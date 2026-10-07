@@ -1,0 +1,161 @@
+# Paper2Data extraction recipe: toxicity / bioassay
+version: "1.0"
+id: toxicity_extract
+name: "Извлечение: токсичность и биотесты"
+kind: recipe
+schema_id: toxicity
+description: >
+  Соединения → endpoints токсичности (IC50, LD50 и т.п.) с условиями assay.
+
+defaults:
+  strategy: entities_first
+  section_include:
+    - abstract
+    - experimental
+    - results
+    - esi
+  section_exclude:
+    - introduction
+    - acknowledgments
+    - references
+  require_quote: true
+  quote_verify_threshold: 90
+
+prompt_templates:
+  system: |
+    Ты — ассистент по извлечению структурированных данных из научной статьи.
+    Извлекай только факты, явно присутствующие в тексте. Для каждого поля и
+    каждой связи укажи quote (дословную цитату) и block_hint.
+    Не выдумывай значения. Если данных нет — пропусти поле.
+    Схема проекта:
+    {{ schema }}
+    {{ instructions }}
+
+  extract_entities: |
+    {{ system }}
+    Целевые типы сущностей: {{ entity_types }}.
+    Словарь обозначений (если есть):
+    {{ abbreviation_map }}
+    Уже извлечённый граф (не дублируй те же label/code):
+    {{ existing_graph }}
+    Примеры (few-shot):
+    {{ few_shot }}
+    Текст ТЕКУЩЕГО фрагмента секции (не всей статьи целиком):
+    {{ section_text }}
+    Таблицы:
+    {{ tables_md }}
+    Подписи рисунков:
+    {{ figure_captions }}
+    Извлеки все целевые сущности из ЭТОГО фрагмента. Пустой список допустим,
+    только если в фрагменте действительно нет таких фактов.
+    Верни JSON по схеме:
+    {{ json_schema }}
+
+  extract_relations: |
+    {{ system }}
+    Целевые типы связей: {{ relation_types }}.
+    Известные сущности:
+    {{ existing_graph }}
+    Словарь обозначений:
+    {{ abbreviation_map }}
+    Текст ТЕКУЩЕГО фрагмента:
+    {{ section_text }}
+    Таблицы:
+    {{ tables_md }}
+    Свяжи сущности из графа фактами из этого фрагмента. Не выдумывай связи.
+    Верни JSON по схеме:
+    {{ json_schema }}
+
+  resolve_codes: |
+    {{ system }}
+    Построй словарь обозначений: шифр/аббревиатура → полное имя или формула
+    соединения (например "1a" → "…", "compound 3" → "…").
+    Текст (experimental + results + esi):
+    {{ section_text }}
+    Верни JSON: {"abbreviations": [{"code": "...", "expansion": "...", "quote": "...",
+    "block_hint": "..."}]}.
+
+steps:
+  - id: resolve_abbreviations
+    name: "Словарь обозначений"
+    description: "Шифры тестируемых соединений."
+    strategy: one_shot
+    section_include:
+      - experimental
+      - results
+      - esi
+    targets:
+      entities: []
+      relations: []
+    prompt_template: resolve_codes
+    output_key: abbreviation_map
+    human_review: true
+
+  - id: extract_compounds
+    name: "Соединения"
+    description: "Тестируемые соединения и состав."
+    strategy: entities_first
+    section_include:
+      - abstract
+      - experimental
+      - results
+    instructions: >
+      Извлекай тестируемые соединения (шифр, формула, название).
+      Не извлекай IC50/LD50 на этом шаге.
+    targets:
+      entities:
+        - Paper
+        - CompoundFamily
+        - Compound
+        - Component
+      relations:
+        - HAS_FAMILY
+        - HAS_MEMBER
+        - HAS_COMPONENT
+        - SAME_AS
+        - SYNTHESIZED_LIKE
+        - REPORTED_IN
+    phases:
+      - name: entities
+        prompt_template: extract_entities
+        human_review: true
+      - name: relations
+        prompt_template: extract_relations
+        human_review: true
+    human_review: true
+
+  - id: extract_toxicity
+    name: "Токсичность и биотесты"
+    description: "IC50/LD50/MIC и условия assay."
+    strategy: entities_first
+    section_include:
+      - abstract
+      - experimental
+      - results
+      - esi
+    instructions: >
+      Извлекай endpoints (ic50, ec50, lc50, ld50, mic, cc50, selectivity_index)
+      с цитатой. Для каждого значения создай Condition (organism, cell_line,
+      assay_name, exposure_time, route). Свяжи Compound → HAS_PROPERTY → Property
+      → MEASURED_UNDER → Condition.
+    targets:
+      entities:
+        - Property
+        - Condition
+      relations:
+        - HAS_PROPERTY
+        - MEASURED_UNDER
+        - MEASURED_ON
+    phases:
+      - name: entities
+        prompt_template: extract_entities
+        human_review: true
+      - name: relations
+        prompt_template: extract_relations
+        human_review: true
+    human_review: true
+
+pipeline:
+  - resolve_abbreviations
+  - extract_compounds
+  - extract_toxicity

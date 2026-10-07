@@ -1,0 +1,66 @@
+# Paper2Data schema template: luminescence overlay on coordination compounds
+version: "1.0"
+id: luminescence
+name: "Люминесцентные комплексы"
+kind: schema
+description: >
+  Overlay поверх coordination_compounds: дополнительные типы люминесцентных
+  свойств (FWHM, Stokes, CIE, efficiency сенсибилизации) и узкие extraction_groups.
+
+imports:
+  - coordination_compounds
+
+attribute_extensions:
+  - entity_type: Property
+    attribute_id: property_type
+    add_enum_values:
+      - fwhm
+      - stokes_shift
+      - cie_coordinates
+      - sensitization_efficiency
+
+extraction_groups:
+  - id: compounds
+    name: "Соединения и состав"
+    entities:
+      - Paper
+      - CompoundFamily
+      - Compound
+      - Component
+    relations:
+      - HAS_FAMILY
+      - HAS_MEMBER
+      - HAS_COMPONENT
+      - SAME_AS
+      - SYNTHESIZED_LIKE
+      - REPORTED_IN
+    section_include:
+      - abstract
+      - experimental
+      - results
+      - esi
+    instructions: >
+      Извлекай шифры комплексов, семейства и состав (катион/лиганды).
+      Не извлекай численные спектральные свойства — отдельный шаг.
+
+  - id: luminescence
+    name: "Люминесцентные свойства"
+    entities:
+      - Property
+      - Condition
+    relations:
+      - HAS_PROPERTY
+      - MEASURED_UNDER
+      - MEASURED_ON
+    section_include:
+      - experimental
+      - results
+      - esi
+    instructions: >
+      Извлекай люминесцентные свойства (QY, λ_em, lifetime, radiative_lifetime,
+      FWHM, Stokes, CIE, T1/S1) только с цитатой и Condition
+      (раствор/порошок/плёнка, растворитель, T, λ_ex/λ_em).
+      ηsens (η_sens, sensitization efficiency) → sensitization_efficiency,
+      не quantum_yield. quantum_yield — только Φ/PLQY/Φ_Ln.
+      lifetime — наблюдаемое τ; radiative_lifetime — τ_rad, если приведено отдельно.
+      Не путай свойства молекулы с характеристиками OLED-устройства.

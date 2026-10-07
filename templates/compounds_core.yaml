@@ -1,0 +1,306 @@
+# Paper2Data schema template: shared compounds core
+# Thin base for organic / coordination / toxicity domains.
+version: "1.0"
+id: compounds_core
+name: "Ядро соединений"
+kind: schema
+description: >
+  Общее ядро: статья → семейство → соединение → компоненты / свойства / условия.
+  Без ролей катион/лиганд и без доменных enum свойств (люминесценция, OLED, toxicity).
+
+imports: []
+
+entity_types:
+  - id: Paper
+    name: "Статья"
+    description: "Научная публикация (текущая или внешняя, упомянутая по DOI)."
+    label_attribute: title
+    attributes:
+      - id: doi
+        name: "DOI"
+        type: doi
+        required: false
+        llm_hint: "DOI статьи, если указан (например 10.1002/anie.2020xxxxx)."
+      - id: title
+        name: "Название"
+        type: text
+        required: false
+        llm_hint: "Полное название статьи."
+      - id: is_external
+        name: "Внешняя"
+        type: bool
+        required: false
+        default: false
+        llm_hint: "true, если статья не текущий документ, а упоминание в литературе (только DOI)."
+
+  - id: CompoundFamily
+    name: "Семейство соединений"
+    description: "Группа родственных соединений (ряд, серия) в одной статье."
+    label_attribute: name
+    attributes:
+      - id: name
+        name: "Название семейства"
+        type: text
+        required: true
+        llm_hint: "Как авторы называют серию/семейство."
+      - id: description
+        name: "Описание"
+        type: text
+        required: false
+        llm_hint: "Краткое описание семейства, если есть в тексте."
+
+  - id: Compound
+    name: "Соединение"
+    description: "Конкретная молекула / комплекс с шифром из статьи."
+    label_attribute: code
+    attributes:
+      - id: code
+        name: "Шифр"
+        type: text
+        required: true
+        llm_hint: "Обозначение из статьи: 1, 2a, Eu-1, complex 3 и т.п."
+      - id: formula
+        name: "Формула"
+        type: text
+        required: false
+        llm_hint: "Молекулярная/структурная формула."
+      - id: name
+        name: "Название"
+        type: text
+        required: false
+        llm_hint: "Полное или систематическое название, если приведено."
+      - id: abbreviation
+        name: "Аббревиатура"
+        type: text
+        required: false
+        llm_hint: "Краткое обозначение, отличное от шифра (если есть)."
+
+  - id: Component
+    name: "Компонент"
+    description: "Строительный блок соединения (фрагмент, лиганд, реагент в составе)."
+    label_attribute: name
+    attributes:
+      - id: name
+        name: "Название"
+        type: text
+        required: true
+        llm_hint: "Название компонента так, как в тексте."
+      - id: abbreviation
+        name: "Аббревиатура"
+        type: text
+        required: false
+        llm_hint: "Аббревиатура компонента, если есть."
+      - id: iupac
+        name: "IUPAC"
+        type: text
+        required: false
+        llm_hint: "IUPAC-название, если явно указано."
+      - id: smiles
+        name: "SMILES"
+        type: smiles
+        required: false
+        llm_hint: "SMILES-строка, только если приведена в статье или ESI."
+      - id: inchi
+        name: "InChI"
+        type: inchi
+        required: false
+        llm_hint: "InChI, только если приведён в статье или ESI."
+      - id: charge
+        name: "Заряд"
+        type: number
+        required: false
+        llm_hint: "Формальный заряд компонента (например +3, -1, 0)."
+
+  - id: Property
+    name: "Свойство"
+    description: >
+      Измеренное или сообщённое свойство соединения. Узел, а не атрибут:
+      имеет условия (MEASURED_UNDER) и может ссылаться на другое соединение (MEASURED_ON).
+    label_attribute: property_type
+    attributes:
+      - id: property_type
+        name: "Тип свойства"
+        type: enum
+        required: true
+        enum_values:
+          - other
+        llm_hint: "Тип свойства. Базовое ядро — other; домены расширяют enum."
+      - id: value
+        name: "Значение"
+        type: number
+        required: false
+        llm_hint: "Численное значение свойства (без единицы)."
+      - id: value_text
+        name: "Значение (текст)"
+        type: text
+        required: false
+        llm_hint: "Текстовое представление, если число не подходит (диапазон, «n.d.» и т.п.)."
+      - id: unit
+        name: "Единица"
+        type: text
+        required: false
+        llm_hint: "Единица измерения."
+      - id: error
+        name: "Погрешность"
+        type: number
+        required: false
+        llm_hint: "Абсолютная погрешность (±), если указана."
+      - id: value_range
+        name: "Диапазон"
+        type: range
+        required: false
+        llm_hint: "Диапазон значений [min, max], если вместо одного числа."
+
+  - id: Condition
+    name: "Условие измерения"
+    description: "Условия, при которых измерено свойство."
+    label_attribute: state
+    attributes:
+      - id: state
+        name: "Состояние"
+        type: enum
+        required: false
+        enum_values:
+          - solution
+          - powder
+          - film
+          - crystal
+          - glass
+          - other
+        llm_hint: "Агрегатное/фазовое состояние образца."
+      - id: solvent
+        name: "Растворитель"
+        type: text
+        required: false
+        llm_hint: "Растворитель, если измерение в растворе."
+      - id: temperature
+        name: "Температура"
+        type: number_with_unit
+        required: false
+        unit: "K"
+        llm_hint: "Температура измерения. Сохраняй единицу."
+      - id: notes
+        name: "Примечания"
+        type: text
+        required: false
+        llm_hint: "Прочие условия измерения, не покрытые полями выше."
+
+relation_types:
+  - id: HAS_FAMILY
+    name: "имеет семейство"
+    description: "Статья описывает семейство соединений."
+    from: Paper
+    to: CompoundFamily
+    cardinality: "1:N"
+    attributes: []
+    llm_hint: "Свяжи Paper с CompoundFamily, если в статье вводится серия/семейство."
+
+  - id: HAS_MEMBER
+    name: "имеет член"
+    description: "Семейство включает конкретное соединение."
+    from: CompoundFamily
+    to: Compound
+    cardinality: "1:N"
+    attributes: []
+    llm_hint: "Свяжи CompoundFamily с каждым Compound-членом серии."
+
+  - id: HAS_COMPONENT
+    name: "имеет компонент"
+    description: "Соединение состоит из компонентов."
+    from: Compound
+    to: Component
+    cardinality: "1:N"
+    attributes:
+      - id: role
+        name: "Роль"
+        type: text
+        required: false
+        llm_hint: "Роль компонента в составе, если указана."
+      - id: count
+        name: "Стехиометрия"
+        type: number
+        required: false
+        llm_hint: "Число единиц компонента в формуле."
+    llm_hint: "Для каждого компонента создай Component и связь HAS_COMPONENT."
+
+  - id: HAS_PROPERTY
+    name: "имеет свойство"
+    description: "У соединения измерено/сообщено свойство."
+    from: Compound
+    to: Property
+    cardinality: "1:N"
+    attributes: []
+    llm_hint: "Свяжи Compound с каждым извлечённым Property."
+
+  - id: MEASURED_UNDER
+    name: "измерено при"
+    description: "Свойство измерено при указанных условиях."
+    from: Property
+    to: Condition
+    cardinality: "N:1"
+    attributes: []
+    llm_hint: "Свяжи Property с Condition, если условия измерения указаны рядом со значением."
+
+  - id: MEASURED_ON
+    name: "измерено на"
+    description: >
+      Свойство относится к одному соединению, но измерено на другом.
+    from: Property
+    to: Compound
+    cardinality: "N:1"
+    attributes: []
+    llm_hint: >
+      Если текст говорит, что свойство измерено на аналоге, свяжи Property → MEASURED_ON → тот Compound.
+
+  - id: SAME_AS
+    name: "то же самое"
+    description: "Два узла обозначают одно и то же соединение (синонимы/шифры)."
+    from: Compound
+    to: Compound
+    cardinality: "N:N"
+    attributes: []
+    llm_hint: "Используй, если два шифра/названия явно относятся к одному соединению."
+
+  - id: SYNTHESIZED_LIKE
+    name: "синтезирован аналогично"
+    description: "Соединение получено по аналогии с другим."
+    from: Compound
+    to: Compound
+    cardinality: "N:1"
+    attributes: []
+    llm_hint: "Если синтез описан как «аналогично соединению X» — свяжи с X."
+
+  - id: REPORTED_IN
+    name: "сообщено в"
+    description: "Соединение или данные о нём сообщены во внешней статье."
+    from: Compound
+    to: Paper
+    cardinality: "N:N"
+    attributes: []
+    llm_hint: >
+      Если соединение/свойство цитируется из другой работы — создай внешний Paper
+      (is_external=true, DOI) и связь REPORTED_IN.
+
+extraction_groups:
+  - id: compounds
+    name: "Соединения и состав"
+    entities:
+      - Paper
+      - CompoundFamily
+      - Compound
+      - Component
+    relations:
+      - HAS_FAMILY
+      - HAS_MEMBER
+      - HAS_COMPONENT
+      - SAME_AS
+      - SYNTHESIZED_LIKE
+      - REPORTED_IN
+    section_include:
+      - abstract
+      - experimental
+      - results
+      - esi
+    instructions: >
+      Извлекай шифры соединений, семейства и состав (компоненты).
+      Не извлекай численные свойства — для них отдельный шаг.

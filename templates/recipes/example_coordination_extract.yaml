@@ -1,0 +1,249 @@
+# Paper2Data extraction recipe example (coordination compounds)
+# Loader contract: version, id, name, kind, schema_id, steps
+version: "1.0"
+id: example_coordination_extract
+name: "Пример: извлечение координационных соединений"
+kind: recipe
+schema_id: coordination_compounds
+description: >
+  Демонстрационный рецепт для одной статьи: словарь шифров → соединения →
+  компоненты → свойства с условиями. Стратегии: iterative / entities_first / one_shot.
+
+# Глобальные настройки (могут переопределяться на шаге)
+defaults:
+  strategy: entities_first
+  section_include:
+    - abstract
+    - experimental
+    - results
+    - esi
+  section_exclude:
+    - introduction
+    - acknowledgments
+    - references
+  require_quote: true
+  quote_verify_threshold: 90
+
+# Плейсхолдеры промптов (Jinja2). Движок подставляет:
+#   {{ schema }}           — описание типов/связей из активной схемы
+#   {{ entity_types }}     — целевые типы сущностей шага
+#   {{ relation_types }}   — целевые типы связей шага
+#   {{ json_schema }}      — JSON Schema structured output
+#   {{ section_text }}     — текст/чанки выбранных секций
+#   {{ tables_md }}        — таблицы в Markdown с id ячеек
+#   {{ figure_captions }}  — список подписей рисунков
+#   {{ abbreviation_map }} — словарь шифров (результат шага resolve_codes)
+#   {{ existing_graph }}   — уже принятые узлы/рёбра (для итерации и дедупа)
+#   {{ few_shot }}         — примеры из GoldSnapshot
+#   {{ target_type }}      — один целевой тип (для iterative)
+#   {{ instructions }}     — доп. инструкции шага
+
+prompt_templates:
+  system: |
+    Ты — ассистент по извлечению структурированных данных из научной статьи.
+    Извлекай только факты, явно присутствующие в тексте. Для каждого поля и
+    каждой связи укажи quote (дословную цитату) и block_hint.
+    Не выдумывай значения. Если данных нет — пропусти поле.
+    Схема проекта:
+    {{ schema }}
+    {{ instructions }}
+
+  iterative_next: |
+    {{ system }}
+    Найди РОВНО ОДНУ следующую сущность типа {{ target_type }}, которой ещё нет
+    в графе. Затем извлеки все её атрибуты и связанные узлы/рёбра, указанные в шаге.
+    Уже в графе (не повторяй эти id/label):
+    {{ existing_graph }}
+    Словарь обозначений:
+    {{ abbreviation_map }}
+    Текст ТЕКУЩЕГО фрагмента (не всей статьи):
+    {{ section_text }}
+    Таблицы:
+    {{ tables_md }}
+    Если в ЭТОМ фрагменте новой сущности {{ target_type }} нет — верни
+    {"entities":[],"relations":[],"done":true}. Иначе done:false и одна сущность.
+    Верни JSON по схеме:
+    {{ json_schema }}
+
+  extract_entities: |
+    {{ system }}
+    Целевые типы сущностей: {{ entity_types }}.
+    Словарь обозначений (если есть):
+    {{ abbreviation_map }}
+    Уже извлечённый граф (не дублируй те же label/code):
+    {{ existing_graph }}
+    Примеры (few-shot):
+    {{ few_shot }}
+    Текст ТЕКУЩЕГО фрагмента секции (не всей статьи целиком):
+    {{ section_text }}
+    Таблицы:
+    {{ tables_md }}
+    Подписи рисунков:
+    {{ figure_captions }}
+    Извлеки все целевые сущности из ЭТОГО фрагмента. Пустой список допустим,
+    только если в фрагменте действительно нет таких фактов.
+    Верни JSON по схеме:
+    {{ json_schema }}
+
+  extract_relations: |
+    {{ system }}
+    Целевые типы связей: {{ relation_types }}.
+    Известные сущности:
+    {{ existing_graph }}
+    Словарь обозначений:
+    {{ abbreviation_map }}
+    Текст ТЕКУЩЕГО фрагмента:
+    {{ section_text }}
+    Таблицы:
+    {{ tables_md }}
+    Свяжи сущности из графа фактами из этого фрагмента. Не выдумывай связи.
+    Верни JSON по схеме:
+    {{ json_schema }}
+
+  one_shot_section: |
+    {{ system }}
+    Извлеки полный подграф для целевых типов за один проход по секции.
+    Цели: сущности {{ entity_types }}, связи {{ relation_types }}.
+    Словарь обозначений:
+    {{ abbreviation_map }}
+    Few-shot:
+    {{ few_shot }}
+    Текст:
+    {{ section_text }}
+    Таблицы:
+    {{ tables_md }}
+    Подписи:
+    {{ figure_captions }}
+    Верни JSON по схеме:
+    {{ json_schema }}
+
+  resolve_codes: |
+    {{ system }}
+    Построй словарь обозначений: шифр/аббревиатура → полное имя или формула
+    соединения/лиганда (например "1" → "Eu(DBM)3BPhen", "DBM" → "dibenzoylmethane").
+    Текст (experimental + results + esi):
+    {{ section_text }}
+    Верни JSON: {"abbreviations": [{"code": "...", "expansion": "...", "quote": "..."}]}.
+
+# ---------------------------------------------------------------------------
+# Steps
+# ---------------------------------------------------------------------------
+steps:
+  - id: resolve_abbreviations
+    name: "Словарь обозначений"
+    description: "Первым шагом собрать шифры соединений и аббревиатуры лигандов."
+    strategy: one_shot
+    section_include:
+      - experimental
+      - results
+      - esi
+    section_exclude:
+      - introduction
+      - acknowledgments
+      - references
+    targets:
+      entities: []
+      relations: []
+    prompt_template: resolve_codes
+    output_key: abbreviation_map
+    human_review: true
+
+  - id: extract_compounds_iterative
+    name: "Соединения (итеративно)"
+    description: >
+      Режим проверки: по одной сущности Compound за раз, затем её связи
+      HAS_COMPONENT / HAS_PROPERTY. Удобно для ручной приёмки.
+    strategy: iterative
+    section_include:
+      - abstract
+      - experimental
+      - results
+      - esi
+    targets:
+      entities:
+        - Compound
+        - CompoundFamily
+        - Component
+        - Property
+        - Condition
+      relations:
+        - HAS_FAMILY
+        - HAS_MEMBER
+        - HAS_COMPONENT
+        - HAS_PROPERTY
+        - MEASURED_UNDER
+        - MEASURED_ON
+      primary_entity: Compound
+    prompt_template: iterative_next
+    stop_when: no_more_entities
+    human_review: true
+
+  - id: extract_entities_first
+    name: "Сущности, затем связи"
+    description: >
+      Полный проход: сначала все сущности целевых типов, проверка человеком,
+      затем все связи. Альтернатива iterative для пакетного теста на эталоне.
+    strategy: entities_first
+    section_include:
+      - abstract
+      - experimental
+      - results
+      - esi
+    targets:
+      entities:
+        - Paper
+        - CompoundFamily
+        - Compound
+        - Component
+        - Property
+        - Condition
+      relations:
+        - HAS_FAMILY
+        - HAS_MEMBER
+        - HAS_COMPONENT
+        - HAS_PROPERTY
+        - MEASURED_UNDER
+        - MEASURED_ON
+        - SAME_AS
+        - SYNTHESIZED_LIKE
+        - REPORTED_IN
+    phases:
+      - name: entities
+        prompt_template: extract_entities
+        human_review: true
+      - name: relations
+        prompt_template: extract_relations
+        human_review: true
+
+  - id: extract_one_shot
+    name: "One-shot по секциям"
+    description: >
+      Для сильных моделей: полный подграф секции за 1–2 прохода.
+      По умолчанию выключен в demo-пайплайне — включается профилем «высокий интеллект».
+    strategy: one_shot
+    enabled: false
+    section_include:
+      - experimental
+      - results
+    targets:
+      entities:
+        - Compound
+        - Component
+        - Property
+        - Condition
+        - CompoundFamily
+      relations:
+        - HAS_MEMBER
+        - HAS_COMPONENT
+        - HAS_PROPERTY
+        - MEASURED_UNDER
+        - MEASURED_ON
+    prompt_template: one_shot_section
+    max_passes: 2
+    human_review: true
+
+# Рекомендуемый порядок прогона для демо (движок может выбрать подмножество)
+pipeline:
+  - resolve_abbreviations
+  - extract_entities_first
+  # альтернативы: extract_compounds_iterative | extract_one_shot

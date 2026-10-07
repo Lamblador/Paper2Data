@@ -1,0 +1,238 @@
+# Paper2Data schema template: coordination compounds
+# Imports compounds_core; adds ligand roles, optical Condition fields, lum Property enums.
+version: "1.0"
+id: coordination_compounds
+name: "Координационные соединения"
+kind: schema
+description: >
+  Шаблон онтологии для извлечения координационных соединений:
+  статья → семейство → соединение → компоненты / свойства / условия.
+  Свойство — отдельный узел (не атрибут), с условиями измерения и
+  возможной ссылкой на другое соединение (MEASURED_ON).
+
+imports:
+  - compounds_core
+
+# ---------------------------------------------------------------------------
+# Entity overlays (replace imported definitions with coordination-specific)
+# ---------------------------------------------------------------------------
+entity_types:
+  - id: CompoundFamily
+    name: "Семейство соединений"
+    description: "Группа родственных комплексов (ряд, серия) в одной статье."
+    label_attribute: name
+    attributes:
+      - id: name
+        name: "Название семейства"
+        type: text
+        required: true
+        llm_hint: "Как авторы называют серию/семейство (например Eu(III) β-diketonate complexes)."
+      - id: description
+        name: "Описание"
+        type: text
+        required: false
+        llm_hint: "Краткое описание семейства, если есть в тексте."
+
+  - id: Compound
+    name: "Соединение"
+    description: "Конкретный комплекс / молекула с шифром из статьи."
+    label_attribute: code
+    attributes:
+      - id: code
+        name: "Шифр"
+        type: text
+        required: true
+        llm_hint: "Обозначение из статьи: 1, 2a, Eu-1, complex 3 и т.п."
+      - id: formula
+        name: "Формула"
+        type: text
+        required: false
+        llm_hint: "Молекулярная/структурная формула, например Eu(DBM)3BPhen."
+      - id: name
+        name: "Название"
+        type: text
+        required: false
+        llm_hint: "Полное или систематическое название соединения, если приведено."
+      - id: abbreviation
+        name: "Аббревиатура"
+        type: text
+        required: false
+        llm_hint: "Краткое обозначение, отличное от шифра (если есть)."
+
+  - id: Component
+    name: "Компонент"
+    description: "Центральный катион или лиганд, входящий в состав соединения."
+    label_attribute: name
+    attributes:
+      - id: name
+        name: "Название"
+        type: text
+        required: true
+        llm_hint: "Название компонента так, как в тексте (например dibenzoylmethane)."
+      - id: abbreviation
+        name: "Аббревиатура"
+        type: text
+        required: false
+        llm_hint: "Аббревиатура лиганда/катиона: DBM, BPhen, phen и т.п."
+      - id: iupac
+        name: "IUPAC"
+        type: text
+        required: false
+        llm_hint: "IUPAC-название, если явно указано."
+      - id: smiles
+        name: "SMILES"
+        type: smiles
+        required: false
+        llm_hint: "SMILES-строка, только если приведена в статье или ESI."
+      - id: inchi
+        name: "InChI"
+        type: inchi
+        required: false
+        llm_hint: "InChI, только если приведён в статье или ESI."
+      - id: charge
+        name: "Заряд"
+        type: number
+        required: false
+        llm_hint: "Формальный заряд компонента (например +3, -1, 0)."
+
+  - id: Condition
+    name: "Условие измерения"
+    description: "Условия, при которых измерено свойство."
+    label_attribute: state
+    attributes:
+      - id: state
+        name: "Состояние"
+        type: enum
+        required: false
+        enum_values:
+          - solution
+          - powder
+          - film
+          - crystal
+          - glass
+          - other
+        llm_hint: "Агрегатное/фазовое состояние образца: solution, powder, film, crystal, glass, other."
+      - id: solvent
+        name: "Растворитель"
+        type: text
+        required: false
+        llm_hint: "Растворитель (CH2Cl2, MeCN, toluene и т.п.), если измерение в растворе."
+      - id: temperature
+        name: "Температура"
+        type: number_with_unit
+        required: false
+        unit: "K"
+        llm_hint: "Температура измерения (обычно K или °C). Сохраняй единицу."
+      - id: excitation_wavelength
+        name: "λ_ex"
+        type: number_with_unit
+        required: false
+        unit: "nm"
+        llm_hint: "Длина волны возбуждения λ_ex."
+      - id: emission_wavelength
+        name: "λ_em"
+        type: number_with_unit
+        required: false
+        unit: "nm"
+        llm_hint: "Длина волны регистрации эмиссии λ_em (если указана для измерения)."
+      - id: concentration
+        name: "Концентрация"
+        type: number_with_unit
+        required: false
+        llm_hint: "Концентрация раствора (M, mM, μM), если указана."
+      - id: atmosphere
+        name: "Атмосфера"
+        type: text
+        required: false
+        llm_hint: "Атмосфера: air, N2, Ar, vacuum и т.п."
+      - id: notes
+        name: "Примечания"
+        type: text
+        required: false
+        llm_hint: "Прочие условия измерения, не покрытые полями выше."
+
+attribute_extensions:
+  - entity_type: Property
+    attribute_id: property_type
+    add_enum_values:
+      - lifetime
+      - radiative_lifetime
+      - quantum_yield
+      - emission_wavelength
+      - absorption_max
+      - molar_extinction
+      - triplet_level
+      - singlet_level
+      - energy_transfer_efficiency
+      - radiative_rate
+      - nonradiative_rate
+
+relation_types:
+  - id: HAS_COMPONENT
+    name: "имеет компонент"
+    description: "Соединение состоит из катиона и/или лигандов."
+    from: Compound
+    to: Component
+    cardinality: "1:N"
+    attributes:
+      - id: role
+        name: "Роль"
+        type: enum
+        required: true
+        enum_values:
+          - central_cation
+          - anionic_ligand
+          - neutral_ligand
+        llm_hint: "Роль компонента: central_cation, anionic_ligand, neutral_ligand."
+      - id: count
+        name: "Стехиометрия"
+        type: number
+        required: false
+        llm_hint: "Число единиц компонента в формуле (например 3 для (DBM)3)."
+    llm_hint: >
+      Для каждого лиганда/катиона создай Component и связь HAS_COMPONENT
+      с role и count по формуле/тексту.
+
+extraction_groups:
+  - id: compounds
+    name: "Соединения и состав"
+    entities:
+      - Paper
+      - CompoundFamily
+      - Compound
+      - Component
+    relations:
+      - HAS_FAMILY
+      - HAS_MEMBER
+      - HAS_COMPONENT
+      - SAME_AS
+      - SYNTHESIZED_LIKE
+      - REPORTED_IN
+    section_include:
+      - abstract
+      - experimental
+      - results
+      - esi
+    instructions: >
+      Извлекай шифры комплексов, семейства и состав (катион/лиганды с role и count).
+      Не извлекай численные свойства люминесценции — для них отдельный шаг.
+
+  - id: luminescence
+    name: "Люминесцентные свойства"
+    entities:
+      - Property
+      - Condition
+    relations:
+      - HAS_PROPERTY
+      - MEASURED_UNDER
+      - MEASURED_ON
+    section_include:
+      - experimental
+      - results
+      - esi
+    instructions: >
+      Извлекай свойства (QY, λ_em, lifetime, radiative_lifetime, T1/S1 и т.п.) только с цитатой.
+      lifetime — наблюдаемое τ (τ_obs / τ_exp); radiative_lifetime — излучательное τ_rad,
+      если авторы приводят его отдельно (τ_rad, radiative lifetime). Не путай с k_r / k_nr.
+      Для каждого свойства создай Condition (раствор/порошок/плёнка, растворитель, T, λ_ex).
+      Если измерение на аналоге (Gd и т.п.) — MEASURED_ON.

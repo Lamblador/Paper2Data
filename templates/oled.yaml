@@ -1,0 +1,292 @@
+# Paper2Data schema template: OLED devices
+# Extends coordination_compounds via imports.
+version: "1.0"
+id: oled
+name: "OLED-устройства"
+kind: schema
+description: >
+  Шаблон онтологии для OLED: устройство → характеристики (Property) и слои;
+  слой → материал → соединение (полный подграф coordination_compounds).
+
+imports:
+  - coordination_compounds
+
+# ---------------------------------------------------------------------------
+# Entity types (OLED-specific; Compound/Property/… из imports)
+# ---------------------------------------------------------------------------
+entity_types:
+  - id: Device
+    name: "Устройство"
+    description: "OLED-устройство или тестовая структура из статьи."
+    label_attribute: name
+    attributes:
+      - id: name
+        name: "Название / шифр"
+        type: text
+        required: true
+        llm_hint: "Обозначение устройства в статье (Device A, OLED-1, Device I и т.п.)."
+      - id: architecture_summary
+        name: "Краткое описание архитектуры"
+        type: text
+        required: false
+        llm_hint: "Краткое текстовое описание стека, если авторы дают одной строкой."
+      - id: emission_color
+        name: "Цвет эмиссии"
+        type: text
+        required: false
+        llm_hint: "Цвет/диапазон эмиссии устройства: red, green, blue, white, NIR и т.п."
+      - id: area
+        name: "Площадь"
+        type: number_with_unit
+        required: false
+        llm_hint: "Активная площадь устройства, если указана (mm^2, cm^2)."
+
+  - id: Layer
+    name: "Слой"
+    description: "Функциональный слой в стеке OLED."
+    label_attribute: role
+    attributes:
+      - id: role
+        name: "Роль слоя"
+        type: enum
+        required: true
+        enum_values:
+          - anode
+          - cathode
+          - HIL
+          - HTL
+          - EBL
+          - EML
+          - HBL
+          - ETL
+          - EIL
+          - capping
+          - spacer
+          - other
+        llm_hint: >
+          Функциональная роль: anode, cathode, HIL, HTL, EBL, EML, HBL, ETL, EIL,
+          capping, spacer, other. Поле обязательно. Если в тексте функция слоя
+          не названа, назначь role по стандартному типу материала и позиции в стеке
+          (ITO/FTO → anode, Al/Ag → cathode, HAT-CN/MoO3/PEDOT:PSS → HIL,
+          NPB/TAPC/TCTA → HTL, LiF/Liq у катода → EIL, TPBi/BPhen → ETL или HBL).
+          OLED neat — undoped/neat плёнка эмиттера без host: role = EML, даже если
+          слов EML/emissive нет. other — только если тип неузнаваем.
+      - id: thickness
+        name: "Толщина"
+        type: number_with_unit
+        required: false
+        unit: "nm"
+        llm_hint: "Толщина слоя (обычно nm)."
+      - id: deposition_method
+        name: "Метод нанесения"
+        type: enum
+        required: false
+        enum_values:
+          - thermal_evaporation
+          - spin_coating
+          - inkjet
+          - sputtering
+          - ALD
+          - other
+        llm_hint: "Метод нанесения: thermal_evaporation, spin_coating, inkjet, sputtering, ALD, other."
+      - id: notes
+        name: "Примечания"
+        type: text
+        required: false
+        llm_hint: "Допинг, соотношение гостя/хозяина и прочие детали слоя."
+
+  - id: Material
+    name: "Материал"
+    description: >
+      Материал слоя (может быть смесью: host + guest). Связь с молекулярным
+      Compound через IS_COMPOUND.
+    label_attribute: name
+    attributes:
+      - id: name
+        name: "Название"
+        type: text
+        required: true
+        llm_hint: "Название материала как в тексте (CBP, Ir(ppy)3, LiF, Alq3 и т.п.)."
+      - id: material_role
+        name: "Роль материала"
+        type: enum
+        required: false
+        enum_values:
+          - host
+          - guest
+          - neat
+          - electrode
+          - dopant
+          - other
+        llm_hint: >
+          Роль в слое: host, guest, neat, electrode, dopant, other.
+          Neat/undoped плёнка эмиттера без хозяина — neat, даже если слово neat
+          в тексте не стоит, а слой описан как чистая плёнка комплекса.
+      - id: weight_percent
+        name: "Масс. %"
+        type: number
+        required: false
+        llm_hint: "Массовая доля / концентрация допанта (wt%), если указана."
+      - id: molar_percent
+        name: "Мол. %"
+        type: number
+        required: false
+        llm_hint: "Мольная доля (mol%), если указана вместо wt%."
+
+# Property используется и для характеристик устройства (через HAS_CHARACTERISTIC).
+# Дополнительные типы свойств OLED — расширение enum через attribute_extensions.
+attribute_extensions:
+  - entity_type: Property
+    attribute_id: property_type
+    add_enum_values:
+      - eqe
+      - current_efficiency
+      - power_efficiency
+      - turn_on_voltage
+      - max_luminance
+      - cie_coordinates
+      - driving_voltage
+      - lifetime_t50
+      - lifetime_t90
+      - sensitization_efficiency
+
+# ---------------------------------------------------------------------------
+# Relation types
+# ---------------------------------------------------------------------------
+relation_types:
+  - id: HAS_CHARACTERISTIC
+    name: "имеет характеристику"
+    description: "Устройство имеет измеренную характеристику (узел Property)."
+    from: Device
+    to: Property
+    cardinality: "1:N"
+    attributes: []
+    llm_hint: >
+      Свяжи Device с Property для EQE (%), ECE/current efficiency (cd/A), яркости,
+      напряжения включения, CIE и т.п. EQE и ECE — разные Property.
+      Условия измерения — через MEASURED_UNDER (из coordination_compounds).
+
+  - id: HAS_LAYER
+    name: "имеет слой"
+    description: "Устройство содержит слой в заданном порядке (снизу вверх или как в статье)."
+    from: Device
+    to: Layer
+    cardinality: "1:N"
+    attributes:
+      - id: order
+        name: "Порядок"
+        type: number
+        required: true
+        llm_hint: "Порядковый номер слоя в стеке (1 = первый в описании авторов / снизу)."
+    llm_hint: "Для каждого слоя стека создай Layer и HAS_LAYER с order."
+
+  - id: MADE_OF
+    name: "состоит из"
+    description: "Слой изготовлен из материала (или нескольких материалов)."
+    from: Layer
+    to: Material
+    cardinality: "1:N"
+    attributes: []
+    llm_hint: "Свяжи Layer с каждым Material (host, guest, электрод и т.д.)."
+
+  - id: IS_COMPOUND
+    name: "является соединением"
+    description: "Материал соответствует молекулярному соединению из схемы coordination_compounds."
+    from: Material
+    to: Compound
+    cardinality: "N:1"
+    attributes: []
+    llm_hint: >
+      Если материал — конкретная молекула/комплекс, свяжи Material → IS_COMPOUND → Compound
+      и при необходимости заполни состав через HAS_COMPONENT.
+
+extraction_groups:
+  - id: compounds
+    name: "Соединения и состав"
+    entities:
+      - Paper
+      - CompoundFamily
+      - Compound
+      - Component
+    relations:
+      - HAS_FAMILY
+      - HAS_MEMBER
+      - HAS_COMPONENT
+      - SAME_AS
+      - SYNTHESIZED_LIKE
+      - REPORTED_IN
+    section_include:
+      - abstract
+      - experimental
+      - results
+      - esi
+    instructions: >
+      Извлекай шифры эмиттеров/комплексов и состав. Не разбирай OLED-стек на этом шаге.
+
+  - id: luminescence
+    name: "Люминесцентные свойства соединений"
+    entities:
+      - Property
+      - Condition
+    relations:
+      - HAS_PROPERTY
+      - MEASURED_UNDER
+      - MEASURED_ON
+    section_include:
+      - experimental
+      - results
+      - esi
+    instructions: >
+      Свойства молекул (QY, lifetime, radiative_lifetime, λ_em в растворе/порошке).
+      ηsens (sensitization efficiency) → property_type sensitization_efficiency,
+      не quantum_yield. quantum_yield — только Φ/PLQY/Φ_Ln.
+      Не извлекай характеристики устройства: EQE (external quantum efficiency, %)
+      и ECE (external current efficiency, cd/A) — это не quantum_yield.
+      lifetime — наблюдаемое τ; radiative_lifetime — τ_rad,
+      если приведено отдельно.
+      Каждое свойство — с Condition.
+
+  - id: device_stack
+    name: "OLED-стек"
+    entities:
+      - Device
+      - Layer
+      - Material
+    relations:
+      - HAS_LAYER
+      - MADE_OF
+      - IS_COMPOUND
+    section_include:
+      - experimental
+      - results
+    instructions: >
+      Разбери стек вида {Device 1: ITO|HAT-CN (10 nm)|…|mCP co 20% 2-Eu|…|Al}.
+      Политика «одно Device / лимит entities» задаётся движком по профилю LLM.
+      Неполное устройство: нет anode или cathode. Отсылки similar/reproducing
+      разворачивай в полный стек эталона. Если Device уже в графе — не дублируй;
+      добавь Layer/Material. Label слоя включает имя устройства.
+      IS_COMPOUND на шифр из словаря (2-Eu, не Eu-2). ESI не нужен.
+      Layer.role обязателен: если функция не написана, выведи её из стандартного
+      типа материала (ITO → anode, Al → cathode, neat-плёнка эмиттера → EML и
+      material_role = neat, и т.д.). Не пропускай role.
+      На фазе entities — только узлы; связи HAS_LAYER/MADE_OF/IS_COMPOUND — на фазе relations.
+
+  - id: device_metrics
+    name: "Характеристики устройств"
+    entities:
+      - Property
+      - Condition
+    relations:
+      - HAS_CHARACTERISTIC
+      - MEASURED_UNDER
+    section_include:
+      - experimental
+      - results
+    instructions: >
+      EQE, ECE, яркость, напряжение включения, CIE, lifetime T50/T90 устройств.
+      EQE (external quantum efficiency, %) → property_type eqe.
+      ECE (external current efficiency, current efficiency, CE, cd/A) →
+      property_type current_efficiency, не eqe. PE (lm/W) → power_efficiency.
+      Если подпись неясна, решай по единице. Не пересчитывай одно в другое.
+      Свяжи Device → HAS_CHARACTERISTIC → Property (+ MEASURED_UNDER при необходимости).
+      Не путай с молекулярными QY/lifetime соединений.

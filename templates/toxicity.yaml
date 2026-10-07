@@ -1,0 +1,126 @@
+# Paper2Data schema template: toxicity / bioassay endpoints
+version: "1.0"
+id: toxicity
+name: "Токсичность и биотесты"
+kind: schema
+description: >
+  Органические/координационные соединения + endpoints токсичности (IC50, LD50 и т.п.).
+  Свойство — узел; условия assay — через Condition (organism, cell_line, assay_name).
+
+imports:
+  - compounds_core
+
+attribute_extensions:
+  - entity_type: Property
+    attribute_id: property_type
+    add_enum_values:
+      - ic50
+      - ec50
+      - lc50
+      - ld50
+      - mic
+      - cc50
+      - selectivity_index
+
+entity_types:
+  - id: Condition
+    name: "Условие измерения"
+    description: "Условия биотеста / измерения токсичности."
+    label_attribute: assay_name
+    attributes:
+      - id: state
+        name: "Состояние"
+        type: enum
+        required: false
+        enum_values:
+          - solution
+          - powder
+          - film
+          - crystal
+          - glass
+          - other
+        llm_hint: "Фазовое состояние образца, если указано."
+      - id: solvent
+        name: "Растворитель / среда"
+        type: text
+        required: false
+        llm_hint: "Среда инкубации или растворитель (DMSO, PBS и т.п.)."
+      - id: temperature
+        name: "Температура"
+        type: number_with_unit
+        required: false
+        unit: "K"
+        llm_hint: "Температура инкубации, если указана."
+      - id: organism
+        name: "Организм"
+        type: text
+        required: false
+        llm_hint: "Вид организма (mouse, zebrafish, bacteria strain и т.п.)."
+      - id: cell_line
+        name: "Клеточная линия"
+        type: text
+        required: false
+        llm_hint: "Клеточная линия (HeLa, MCF-7, A549 и т.п.)."
+      - id: assay_name
+        name: "Название теста"
+        type: text
+        required: false
+        llm_hint: "Название assay (MTT, SRB, brine shrimp и т.п.)."
+      - id: exposure_time
+        name: "Время экспозиции"
+        type: number_with_unit
+        required: false
+        llm_hint: "Длительность воздействия (h, min)."
+      - id: route
+        name: "Путь введения"
+        type: text
+        required: false
+        llm_hint: "Путь введения: oral, i.p., i.v., topical и т.п."
+      - id: notes
+        name: "Примечания"
+        type: text
+        required: false
+        llm_hint: "Прочие условия биотеста."
+
+extraction_groups:
+  - id: compounds
+    name: "Соединения"
+    entities:
+      - Paper
+      - CompoundFamily
+      - Compound
+      - Component
+    relations:
+      - HAS_FAMILY
+      - HAS_MEMBER
+      - HAS_COMPONENT
+      - SAME_AS
+      - SYNTHESIZED_LIKE
+      - REPORTED_IN
+    section_include:
+      - abstract
+      - experimental
+      - results
+    instructions: >
+      Извлекай тестируемые соединения (шифр, формула, название).
+      Не извлекай IC50/LD50 на этом шаге.
+
+  - id: toxicity
+    name: "Токсичность и биотесты"
+    entities:
+      - Property
+      - Condition
+    relations:
+      - HAS_PROPERTY
+      - MEASURED_UNDER
+      - MEASURED_ON
+    section_include:
+      - abstract
+      - experimental
+      - results
+      - esi
+    instructions: >
+      Извлекай endpoints (ic50, ec50, lc50, ld50, mic, cc50, selectivity_index)
+      с цитатой. Для каждого значения создай Condition (organism, cell_line,
+      assay_name, exposure_time, route). Свяжи Compound → HAS_PROPERTY → Property
+      → MEASURED_UNDER → Condition.

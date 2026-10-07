@@ -1,0 +1,276 @@
+# Paper2Data extraction recipe: OLED devices (narrow subgraph steps)
+version: "1.0"
+id: oled_extract
+name: "Извлечение: OLED-устройства"
+kind: recipe
+schema_id: oled
+description: >
+  Узкие шаги: шифры → соединения → OLED-стек (Device→Layer→Material→Compound)
+  → люминесценция молекул → характеристики устройств. ESI не используется для стека.
+
+defaults:
+  strategy: entities_first
+  section_include:
+    - abstract
+    - experimental
+    - results
+    - esi
+  section_exclude:
+    - introduction
+    - acknowledgments
+    - references
+  require_quote: true
+  quote_verify_threshold: 90
+
+prompt_templates:
+  system: |
+    Ты — ассистент по извлечению структурированных данных из научной статьи.
+    Извлекай только факты, явно присутствующие в тексте. Для каждого поля и
+    каждой связи укажи quote (дословную цитату) и block_hint.
+    Не выдумывай значения. Если данных нет — пропусти поле.
+    Схема проекта:
+    {{ schema }}
+    {{ instructions }}
+
+  extract_entities: |
+    {{ system }}
+    Целевые типы сущностей: {{ entity_types }}.
+    Словарь обозначений (если есть):
+    {{ abbreviation_map }}
+    Уже извлечённый граф (не дублируй те же label/code):
+    {{ existing_graph }}
+    Примеры (few-shot):
+    {{ few_shot }}
+    Текст ТЕКУЩЕГО фрагмента секции (не всей статьи целиком):
+    {{ section_text }}
+    Таблицы:
+    {{ tables_md }}
+    Подписи рисунков:
+    {{ figure_captions }}
+    Извлеки все целевые сущности из ЭТОГО фрагмента. Пустой список допустим,
+    только если в фрагменте действительно нет таких фактов.
+    Верни JSON по схеме:
+    {{ json_schema }}
+
+  extract_relations: |
+    {{ system }}
+    Целевые типы связей: {{ relation_types }}.
+    Известные сущности:
+    {{ existing_graph }}
+    Словарь обозначений:
+    {{ abbreviation_map }}
+    Текст ТЕКУЩЕГО фрагмента:
+    {{ section_text }}
+    Таблицы:
+    {{ tables_md }}
+    Свяжи сущности из графа фактами из этого фрагмента. Не выдумывай связи.
+    Верни JSON по схеме:
+    {{ json_schema }}
+
+  one_shot_section: |
+    {{ system }}
+    Извлеки полный подграф для целевых типов за один проход по фрагменту.
+    Цели: сущности {{ entity_types }}, связи {{ relation_types }}.
+    Инструкции шага:
+    {{ instructions }}
+    Словарь обозначений:
+    {{ abbreviation_map }}
+    Уже извлечённый граф (не дублируй те же label/code):
+    {{ existing_graph }}
+    Примеры (few-shot):
+    {{ few_shot }}
+    Текст ТЕКУЩЕГО фрагмента:
+    {{ section_text }}
+    Таблицы:
+    {{ tables_md }}
+    Подписи рисунков:
+    {{ figure_captions }}
+    Верни сущности и связи вместе. Для каждого поля и связи — quote и block_hint.
+    Верни JSON по схеме:
+    {{ json_schema }}
+
+  resolve_codes: |
+    {{ system }}
+    Построй словарь обозначений: шифр/аббревиатура → полное имя или формула
+    соединения/материала (например "2-Eu" → "[Eu(Btfa)3(dinonylbipy)]", "mCP" → "…").
+    Текст (experimental + results + esi):
+    {{ section_text }}
+    Верни JSON: {"abbreviations": [{"code": "...", "expansion": "...", "quote": "...",
+    "block_hint": "..."}]}.
+
+steps:
+  - id: resolve_abbreviations
+    name: "Словарь обозначений"
+    description: "Шифры комплексов и аббревиатуры материалов стека."
+    strategy: one_shot
+    section_include:
+      - experimental
+      - results
+      - esi
+    targets:
+      entities: []
+      relations: []
+    prompt_template: resolve_codes
+    output_key: abbreviation_map
+    human_review: true
+
+  - id: extract_compounds
+    name: "Соединения и состав"
+    description: "Эмиттеры/комплексы и компоненты."
+    strategy: entities_first
+    section_include:
+      - abstract
+      - experimental
+      - results
+      - esi
+    instructions: >
+      Извлекай шифры эмиттеров/комплексов и состав. Не разбирай OLED-стек на этом шаге.
+    targets:
+      entities:
+        - Paper
+        - CompoundFamily
+        - Compound
+        - Component
+      relations:
+        - HAS_FAMILY
+        - HAS_MEMBER
+        - HAS_COMPONENT
+        - SAME_AS
+        - SYNTHESIZED_LIKE
+        - REPORTED_IN
+    phases:
+      - name: entities
+        prompt_template: extract_entities
+        human_review: true
+      - name: relations
+        prompt_template: extract_relations
+        human_review: true
+    human_review: true
+
+  - id: extract_device_stack
+    name: "OLED-стек"
+    description: "Device → Layer → Material → Compound (IS_COMPOUND)."
+    strategy: entities_first
+    section_include:
+      - experimental
+      - results
+    section_exclude:
+      - esi
+      - introduction
+      - acknowledgments
+      - references
+    instructions: >
+      Разбери стек вида {Device 1: ITO|HAT-CN (10 nm)|…|mCP co 20% 2-Eu (20 nm)|…|Al}.
+      Политика «одно Device / лимит entities» задаётся движком по профилю LLM
+      (локальный — добор по одному неполному устройству; облачный — все стеки сразу).
+      Неполное устройство: нет слоя anode или cathode. Отсылки similar/reproducing
+      разворачивай в полный стек эталона, меняя только явно названное отличие.
+      Не дублируй Device, если он уже есть. Label слоя включает имя устройства.
+      thickness — число + единица (например {"value": 10, "unit": "nm"} или просто в notes).
+      Material для host/guest в EML; IS_COMPOUND на шифр из словаря (2-Eu, не Eu-2).
+      Layer.role обязателен у каждого слоя. Если статья не называет функцию,
+      назначь role по стандартному типу материала и позиции в стеке, не пропускай поле:
+      ITO/FTO → anode; Al/Ag → cathode; LiF/Liq у катода → EIL;
+      HAT-CN/MoO3/PEDOT:PSS → HIL; NPB/TAPC/TCTA → HTL;
+      host:guest, doped или OLED neat (neat/undoped плёнка эмиттера без host) → EML,
+      у neat ещё material_role = neat; TPBi/BPhen → ETL или HBL сразу после EML.
+      Quote — фрагмент с материалом, даже если слова роли в нём нет.
+      На фазе entities не пиши relations — только Layer/Material (и Device, если нового нет).
+      Связи HAS_LAYER / MADE_OF / IS_COMPOUND — только на фазе relations.
+    targets:
+      entities:
+        - Device
+        - Layer
+        - Material
+      relations:
+        - HAS_LAYER
+        - MADE_OF
+        - IS_COMPOUND
+    phases:
+      - name: entities
+        prompt_template: extract_entities
+        human_review: true
+      - name: relations
+        prompt_template: extract_relations
+        human_review: true
+    human_review: true
+
+  - id: extract_luminescence
+    name: "Люминесценция соединений"
+    description: "QY, lifetime, radiative_lifetime, λ_em молекул (не EQE устройств)."
+    strategy: entities_first
+    section_include:
+      - experimental
+      - results
+      - esi
+    instructions: >
+      Свойства молекул (QY, lifetime, radiative_lifetime, λ_em в растворе/порошке).
+      ηsens, η_sens, sensitization efficiency → property_type sensitization_efficiency.
+      Это не quantum_yield, даже если значение в %. quantum_yield — только Φ, PLQY, Φ_Ln.
+      Если приведены и Φ, и ηsens — два Property.
+      Не извлекай EQE (external quantum efficiency, %) и ECE (external current
+      efficiency, cd/A) устройства — это не quantum_yield.
+      lifetime — наблюдаемое τ; radiative_lifetime — τ_rad,
+      если приведено отдельно (не путай с k_r). Каждое свойство — с Condition.
+    targets:
+      entities:
+        - Property
+        - Condition
+      relations:
+        - HAS_PROPERTY
+        - MEASURED_UNDER
+        - MEASURED_ON
+    phases:
+      - name: entities
+        prompt_template: extract_entities
+        human_review: true
+      - name: relations
+        prompt_template: extract_relations
+        human_review: true
+    human_review: true
+
+  - id: extract_device_metrics
+    name: "Характеристики устройств"
+    description: "EQE (%), ECE (cd/A), яркость, напряжение, CIE устройств."
+    strategy: entities_first
+    section_include:
+      - experimental
+      - results
+    section_exclude:
+      - esi
+      - introduction
+      - acknowledgments
+      - references
+    instructions: >
+      EQE, ECE, яркость, напряжение включения, CIE, lifetime T50/T90 устройств.
+      EQE (external quantum efficiency, η_EQE, %) → property_type eqe.
+      ECE (external current efficiency, current efficiency, CE, η_c, cd/A или cd A^-1)
+      → property_type current_efficiency, не eqe.
+      PE (power efficiency, lm/W) → power_efficiency.
+      Если в тексте есть и EQE, и ECE — два отдельных Property.
+      Если подпись неоднозначна, решай по единице и не пересчитывай одно в другое.
+      В JSON пиши id eqe / current_efficiency / power_efficiency, не аббревиатуры.
+      Свяжи Device → HAS_CHARACTERISTIC → Property.
+      Не путай с молекулярными QY/lifetime соединений.
+    targets:
+      entities:
+        - Property
+        - Condition
+      relations:
+        - HAS_CHARACTERISTIC
+        - MEASURED_UNDER
+    phases:
+      - name: entities
+        prompt_template: extract_entities
+        human_review: true
+      - name: relations
+        prompt_template: extract_relations
+        human_review: true
+    human_review: true
+
+pipeline:
+  - resolve_abbreviations
+  - extract_compounds
+  - extract_device_stack
+  - extract_luminescence
+  - extract_device_metrics
